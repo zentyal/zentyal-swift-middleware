@@ -681,6 +681,7 @@ class BucketController(WSGIContext):
 
         return get_err_response('Unsupported')
 
+
 class ObjectController(WSGIContext):
     """
     Handles requests on objects
@@ -852,7 +853,7 @@ class Swift3Middleware(object):
     def handle_request(self, env, start_response):
         req = Request(env)
         self.logger.debug('Calling Swift3 Middleware')
-	self.logger.debug(req.__dict__)
+        self.logger.debug(req.__dict__)
 
         if 'AWSAccessKeyId' in req.params:
             try:
