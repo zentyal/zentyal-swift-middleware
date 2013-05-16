@@ -163,7 +163,8 @@ class FakeAppObject(FakeApp):
         elif env['REQUEST_METHOD'] == 'PUT':
             if self.status == 201:
                 start_response(HTTPCreated(request=req).status,
-                               [('etag', self.response_headers['etag'])])
+                    [('etag', self.response_headers['etag']),
+                     ('last-modified', self.response_headers['last-modified'])])
             elif self.status == 401:
                 start_response(HTTPUnauthorized(request=req).status, [])
             elif self.status == 403:
@@ -573,6 +574,21 @@ class TestSwift3(unittest.TestCase):
             local_app.app.response_args[1])
         self.assertEquals(headers['etag'],
                           "\"%s\"" % local_app.app.response_headers['etag'])
+
+    def test_object_PUT_versions(self):
+        app = Mock(wraps=FakeAppObject(201))
+        local_app = swift3.filter_factory({})(app)
+        req = Request.blank('/bucket/object',
+                            environ={'REQUEST_METHOD': 'PUT'},
+                            headers={'Authorization': 'AWS test:hmac'})
+        req.date = datetime.now()
+        req.content_type = 'text/plain'
+        local_app(req.environ, local_app.app.do_start_response)
+        self.assertEquals(app.call_count, 2)
+        self.assertEquals(app.call_args_list[0][0][0]['PATH_INFO'],
+                          '/v1/test/bucket/object')
+        self.assertEquals(app.call_args_list[1][0][0]['PATH_INFO'],
+                          '/v1/test/bucket_versions/object#1294190354.0#1')
 
     def test_object_PUT_headers(self):
         class FakeApp(object):

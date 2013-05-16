@@ -57,6 +57,8 @@ import base64
 from xml.sax.saxutils import escape as xml_escape
 import urlparse
 from xml.dom.minidom import parseString
+from time import mktime
+from dateutil.parser import parse
 
 from simplejson import loads
 import email.utils
@@ -377,6 +379,7 @@ def validate_bucket_name(name):
         return True
 
 class BaseController(WSGIContext):
+    VERSIONS_BUCKET_SUFFIX = '_versions'
 
     def __init__(self, app):
         super(BaseController, self).__init__(app)
@@ -399,6 +402,14 @@ class BaseController(WSGIContext):
                 object = self.object_name
         path = '/'.join(filter(None, [account, container, object]))
         env['PATH_INFO'] = '/v1/%s' % path
+
+    def _versioned_object_of(self, key, last_modified, deleted=False):
+        # TODO regex last_modified
+        timestamp = mktime(parse(last_modified).timetuple())
+        return "%s#%s#%s" % (key, timestamp, deleted and "0" or "1")
+
+    def _versioned_bucket_of(self, bucket):
+        return bucket + self.VERSIONS_BUCKET_SUFFIX
 
 
 class ServiceController(BaseController):
@@ -444,8 +455,6 @@ class BucketController(BaseController):
     """
     Handles bucket request.
     """
-    VERSIONS_BUCKET_SUFFIX = '_versions'
-
     def __init__(self, app, account_name, container_name, **kwargs):
         super(BucketController, self).__init__(app)
 
@@ -613,7 +622,7 @@ class BucketController(BaseController):
                         headers={'Location': self.container_name})
 
         # Created versions bucket
-        self.container_name += self.VERSIONS_BUCKET_SUFFIX
+        self.container_name = self._versioned_bucket_of(self.container_name)
         self._app_call(env)
         status = self._get_status_int()
 
@@ -837,9 +846,29 @@ class ObjectController(BaseController):
             body = '<CopyObjectResult>' \
                    '<ETag>"%s"</ETag>' \
                    '</CopyObjectResult>' % self._response_header_value('etag')
-            return Response(status=HTTP_OK, body=body)
+            res = Response(status=HTTP_OK, body=body)
+        else:
+            res = Response(status=HTTP_OK,
+                           etag=self._response_header_value('etag'))
 
-        return Response(status=200, etag=self._response_header_value('etag'))
+        last_modified = self._response_header_value('last-modified')
+        self.container_name = self._versioned_bucket_of(self.container_name)
+        self.object_name = self._versioned_object_of(self.object_name,
+                                                     last_modified)
+        body_iter = self._app_call(env)
+        status = self._get_status_int()
+
+        if status != HTTP_CREATED:
+            if status in (HTTP_UNAUTHORIZED, HTTP_FORBIDDEN):
+                return get_err_response('AccessDenied')
+            elif status == HTTP_NOT_FOUND:
+                return get_err_response('NoSuchBucket')
+            elif status == HTTP_UNPROCESSABLE_ENTITY:
+                return get_err_response('InvalidDigest')
+            else:
+                return get_err_response('InvalidURI')
+
+        return res
 
     def POST(self, env, start_response):
         return get_err_response('AccessDenied')
