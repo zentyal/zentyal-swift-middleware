@@ -444,6 +444,8 @@ class BucketController(BaseController):
     """
     Handles bucket request.
     """
+    VERSIONS_BUCKET_SUFFIX = '_versions'
+
     def __init__(self, app, account_name, container_name, **kwargs):
         super(BucketController, self).__init__(app)
 
@@ -607,9 +609,29 @@ class BucketController(BaseController):
             else:
                 return get_err_response('InvalidURI')
 
-        resp = Response()
-        resp.headers['Location'] = self.container_name
-        resp.status = HTTP_OK
+        resp = Response(status=HTTP_OK,
+                        headers={'Location': self.container_name})
+
+        # Created versions bucket
+        self.container_name += self.VERSIONS_BUCKET_SUFFIX
+        self._app_call(env)
+        status = self._get_status_int()
+
+        if status != HTTP_CREATED and status != HTTP_NO_CONTENT:
+            # Remove the one just created
+            env['REQUEST_METHOD'] = 'DELETE'
+            self.container_name = self.container_name.split(
+                                        self.VERSIONS_BUCKET_SUFFIX)[0]
+            self._app_call(env)
+            # If we fail deleting, nothing we can do (try it several times?)
+
+            if status in (HTTP_UNAUTHORIZED, HTTP_FORBIDDEN):
+                return get_err_response('AccessDenied')
+            elif status == HTTP_ACCEPTED:
+                return get_err_response('BucketAlreadyExists')
+            else:
+                return get_err_response('InvalidURI')
+
         return resp
 
     def DELETE(self, env, start_response):
