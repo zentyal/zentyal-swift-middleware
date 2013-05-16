@@ -376,21 +376,45 @@ def validate_bucket_name(name):
     else:
         return True
 
+class BaseController(WSGIContext):
 
-class ServiceController(WSGIContext):
+    def __init__(self, app):
+        super(BaseController, self).__init__(app)
+
+    def _app_call(self, env):
+        copy_env = env.copy()
+        self._set_token(copy_env)
+        self._set_path_info(copy_env)
+        return super(BaseController, self)._app_call(copy_env)
+
+    def _set_token(self, env):
+        token = base64.urlsafe_b64encode(canonical_string(Request(env)))
+        env['HTTP_X_AUTH_TOKEN'] = token
+
+    def _set_path_info(self, env):
+        account, container, object = self.account_name, None, None
+        if hasattr(self, 'container_name'):
+            container = self.container_name
+            if hasattr(self, 'object_name'):
+                object = self.object_name
+        path = '/'.join(filter(None, [account, container, object]))
+        env['PATH_INFO'] = '/v1/%s' % path
+
+
+class ServiceController(BaseController):
     """
     Handles account level requests.
     """
-    def __init__(self, env, app, account_name, token, **kwargs):
-        WSGIContext.__init__(self, app)
-        env['HTTP_X_AUTH_TOKEN'] = token
-        env['PATH_INFO'] = unquote('/v1/%s' % account_name)
+    def __init__(self, app, account_name, **kwargs):
+        super(ServiceController, self).__init__(app)
+        self.account_name = unquote(account_name)
 
     def GET(self, env, start_response):
         """
         Handle GET Service request
         """
         env['QUERY_STRING'] = 'format=json'
+
         body_iter = self._app_call(env)
         status = self._get_status_int()
 
@@ -401,7 +425,7 @@ class ServiceController(WSGIContext):
                 return get_err_response('InvalidURI')
 
         containers = loads(''.join(list(body_iter)))
-        # we don't keep the creation time of a backet (s3cmd doesn't
+        # we don't keep the creation time of a bucket (s3cmd doesn't
         # work without that) so we use something bogus.
         body = '<?xml version="1.0" encoding="UTF-8"?>' \
                '<ListAllMyBucketsResult ' \
@@ -416,17 +440,16 @@ class ServiceController(WSGIContext):
         return resp
 
 
-class BucketController(WSGIContext):
+class BucketController(BaseController):
     """
     Handles bucket request.
     """
-    def __init__(self, env, app, account_name, token, container_name,
-                 **kwargs):
-        WSGIContext.__init__(self, app)
-        self.container_name = unquote(container_name)
+    def __init__(self, app, account_name, container_name, **kwargs):
+        super(BucketController, self).__init__(app)
+
         self.account_name = unquote(account_name)
-        env['HTTP_X_AUTH_TOKEN'] = token
-        env['PATH_INFO'] = unquote('/v1/%s/%s' % (account_name, container_name))
+        self.container_name = unquote(container_name)
+
         conf = kwargs.get('conf', {})
         self.location = conf.get('location', 'US')
 
@@ -455,6 +478,7 @@ class BucketController(WSGIContext):
             env['QUERY_STRING'] += '&prefix=%s' % quote(args['prefix'])
         if 'delimiter' in args:
             env['QUERY_STRING'] += '&delimiter=%s' % quote(args['delimiter'])
+
         body_iter = self._app_call(env)
         status = self._get_status_int()
         headers = dict(self._response_headers)
@@ -646,10 +670,9 @@ class BucketController(WSGIContext):
             del tmp_env['QUERY_STRING']
             tmp_env['CONTENT_LENGTH'] = '0'
             tmp_env['REQUEST_METHOD'] = 'DELETE'
-            controller = ObjectController(tmp_env, self.app, self.account_name,
-                                          env['HTTP_X_AUTH_TOKEN'],
+            controller = ObjectController(self.app, self.account_name,
                                           self.container_name, key)
-            body_iter = controller._app_call(tmp_env)
+            controller._app_call(tmp_env)
             status = controller._get_status_int()
 
             if status == HTTP_NO_CONTENT or status == HTTP_NOT_FOUND:
@@ -686,18 +709,16 @@ class BucketController(WSGIContext):
         return get_err_response('Unsupported')
 
 
-class ObjectController(WSGIContext):
+class ObjectController(BaseController):
     """
     Handles requests on objects
     """
-    def __init__(self, env, app, account_name, token, container_name,
-                 object_name, **kwargs):
-        WSGIContext.__init__(self, app)
+    def __init__(self, app, account_name, container_name, object_name,
+                 **kwargs):
+        super(ObjectController, self).__init__(app)
         self.account_name = unquote(account_name)
         self.container_name = unquote(container_name)
-        env['HTTP_X_AUTH_TOKEN'] = token
-        env['PATH_INFO'] = unquote('/v1/%s/%s/%s' % (account_name,
-                                   container_name, object_name))
+        self.object_name = unquote(object_name)
 
     def GETorHEAD(self, env, start_response):
         if 'QUERY_STRING' in env:
@@ -909,9 +930,7 @@ class Swift3Middleware(object):
                 return get_err_response('RequestTimeTooSkewed')(env,
                                                                 start_response)
 
-        token = base64.urlsafe_b64encode(canonical_string(req))
-
-        controller = controller(env, self.app, account, token, conf=self.conf,
+        controller = controller(self.app, account, conf=self.conf,
                                 **path_parts)
 
         if hasattr(controller, req.method):
