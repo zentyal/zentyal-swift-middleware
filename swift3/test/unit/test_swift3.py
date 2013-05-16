@@ -15,6 +15,7 @@
 
 import unittest
 from datetime import datetime
+from mock import MagicMock as Mock
 import cgi
 import hashlib
 
@@ -400,6 +401,19 @@ class TestSwift3(unittest.TestCase):
                             headers={'Authorization': 'AWS test:tester:hmac'})
         resp = local_app(req.environ, local_app.app.do_start_response)
         self.assertEquals(local_app.app.response_args[0].split()[0], '200')
+
+    def test_bucket_PUT_versions(self):
+        app = Mock(wraps=FakeAppBucket(201))
+        local_app = swift3.filter_factory({})(app)
+        req = Request.blank('/bucket',
+                            environ={'REQUEST_METHOD': 'PUT'},
+                            headers={'Authorization': 'AWS test:hmac'})
+        local_app(req.environ, local_app.app.do_start_response)
+        self.assertEquals(app.call_count, 2)
+        self.assertEquals(app.call_args_list[0][0][0]['PATH_INFO'],
+                          '/v1/test/bucket')
+        self.assertEquals(app.call_args_list[1][0][0]['PATH_INFO'],
+                          '/v1/test/bucket_versions')
 
     def test_bucket_DELETE_error(self):
         code = self._test_method_error(FakeAppBucket, 'DELETE', '/bucket', 401)
