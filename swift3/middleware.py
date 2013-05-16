@@ -405,7 +405,9 @@ class BaseController(WSGIContext):
 
     def _versioned_object_of(self, key, last_modified, deleted=False):
         # TODO regex last_modified
-        timestamp = mktime(parse(last_modified).timetuple())
+        if isinstance(last_modified, basestring):
+            last_modified = parse(last_modified)
+        timestamp = mktime(last_modified.timetuple())
         return "%s#%s#%s" % (key, timestamp, deleted and "0" or "1")
 
     def _versioned_bucket_of(self, bucket):
@@ -888,8 +890,27 @@ class ObjectController(BaseController):
             else:
                 return get_err_response('InvalidURI')
 
-        resp = Response()
-        resp.status = HTTP_NO_CONTENT
+        env['REQUEST_METHOD']= 'PUT'
+        env['CONTENT_TYPE'] = 'text/plain'
+        env['CONTENT_LENGTH'] = '0'
+        self.container_name = self._versioned_bucket_of(self.container_name)
+        self.object_name = self._versioned_object_of(self.object_name,
+                                                     datetime.datetime.now(),
+                                                     deleted=True)
+        body_iter = self._app_call(env)
+        status = self._get_status_int()
+
+        if status != HTTP_CREATED:
+            if status in (HTTP_UNAUTHORIZED, HTTP_FORBIDDEN):
+                return get_err_response('AccessDenied')
+            elif status == HTTP_NOT_FOUND:
+                return get_err_response('NoSuchBucket')
+            elif status == HTTP_UNPROCESSABLE_ENTITY:
+                return get_err_response('InvalidDigest')
+            else:
+                return get_err_response('InvalidURI')
+
+        resp = Response(status=HTTP_NO_CONTENT)
         return resp
 
 

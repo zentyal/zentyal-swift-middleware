@@ -15,7 +15,7 @@
 
 import unittest
 from datetime import datetime
-from mock import MagicMock as Mock
+from mock import MagicMock as Mock, patch
 import cgi
 import hashlib
 
@@ -29,10 +29,17 @@ from swift.common.swob import Request, Response, HTTPUnauthorized, \
 from swift3 import middleware as swift3
 
 
+class FakeDatetime(datetime):
+    def __new__(cls, *args, **kwargs):
+        return datetime.__new__(datetime, *args, **kwargs)
+
 class FakeApp(object):
-    def __init__(self):
+    def __init__(self, status=200):
         self.app = self
         self.response_args = []
+        self.status = status
+        if isinstance(status, list):
+            self.status.reverse()
 
     def __call__(self, env, start_response):
         return "FAKE APP"
@@ -40,15 +47,21 @@ class FakeApp(object):
     def do_start_response(self, *args):
         self.response_args.extend(args)
 
+    def next_status(self):
+        if isinstance(self.status, list):
+            return self.status.pop()
+        else:
+            return self.status
+
 
 class FakeAppService(FakeApp):
     def __init__(self, status=200):
-        FakeApp.__init__(self)
-        self.status = status
+        super(FakeAppService, self).__init__(status)
         self.buckets = (('apple', 1, 200), ('orange', 3, 430))
 
     def __call__(self, env, start_response):
-        if self.status == 200:
+        status = self.next_status()
+        if status == 200:
             start_response(Response().status, [('Content-Type', 'text/xml')])
             json_pattern = ['"name":%s', '"count":%s', '"bytes":%s']
             json_pattern = '{' + ','.join(json_pattern) + '}'
@@ -59,9 +72,9 @@ class FakeAppService(FakeApp):
                                 (name, b[1], b[2]))
             account_list = '[' + ','.join(json_out) + ']'
             return account_list
-        elif self.status == 401:
+        elif status == 401:
             start_response(HTTPUnauthorized().status, [])
-        elif self.status == 403:
+        elif status == 403:
             start_response(HTTPForbidden().status, [])
         else:
             start_response(HTTPBadRequest().status, [])
@@ -70,16 +83,16 @@ class FakeAppService(FakeApp):
 
 class FakeAppBucket(FakeApp):
     def __init__(self, status=200):
-        FakeApp.__init__(self)
-        self.status = status
+        super(FakeAppBucket, self).__init__(status)
         self.objects = (('rose', '2011-01-05T02:19:14.275290', 0, 303),
                         ('viola', '2011-01-05T02:19:14.275290', 0, 3909),
                         ('lily', '2011-01-05T02:19:14.275290', 0, 3909))
 
     def __call__(self, env, start_response):
         self.env = env
+        status = self.next_status()
         if env['REQUEST_METHOD'] == 'GET':
-            if self.status == 200:
+            if status == 200:
                 start_response(Response().status,
                                [('Content-Type', 'text/xml')])
                 json_pattern = ['"name":%s', '"last_modified":%s', '"hash":%s',
@@ -93,35 +106,35 @@ class FakeAppBucket(FakeApp):
                                     (name, time, b[2], b[3]))
                 account_list = '[' + ','.join(json_out) + ']'
                 return account_list
-            elif self.status == 401:
+            elif status == 401:
                 start_response(HTTPUnauthorized().status, [])
-            elif self.status == 403:
+            elif status == 403:
                 start_response(HTTPForbidden().status, [])
-            elif self.status == 404:
+            elif status == 404:
                 start_response(HTTPNotFound().status, [])
             else:
                 start_response(HTTPBadRequest().status, [])
         elif env['REQUEST_METHOD'] == 'PUT':
-            if self.status == 201:
+            if status == 201:
                 start_response(HTTPCreated().status, [])
-            elif self.status == 401:
+            elif status == 401:
                 start_response(HTTPUnauthorized().status, [])
-            elif self.status == 403:
+            elif status == 403:
                 start_response(HTTPForbidden().status, [])
-            elif self.status == 202:
+            elif status == 202:
                 start_response(HTTPAccepted().status, [])
             else:
                 start_response(HTTPBadRequest().status, [])
         elif env['REQUEST_METHOD'] == 'DELETE':
-            if self.status == 204:
+            if status == 204:
                 start_response(HTTPNoContent().status, [])
-            elif self.status == 401:
+            elif status == 401:
                 start_response(HTTPUnauthorized().status, [])
-            elif self.status == 403:
+            elif status == 403:
                 start_response(HTTPForbidden().status, [])
-            elif self.status == 404:
+            elif status == 404:
                 start_response(HTTPNotFound().status, [])
-            elif self.status == 409:
+            elif status == 409:
                 start_response(HTTPConflict().status, [])
             else:
                 start_response(HTTPBadRequest().status, [])
@@ -130,8 +143,7 @@ class FakeAppBucket(FakeApp):
 
 class FakeAppObject(FakeApp):
     def __init__(self, status=200):
-        FakeApp.__init__(self)
-        self.status = status
+        super(FakeAppObject, self).__init__(status)
         self.object_body = 'hello'
         self.response_headers = {'Content-Type': 'text/html',
                                  'Content-Length': len(self.object_body),
@@ -141,9 +153,10 @@ class FakeAppObject(FakeApp):
 
     def __call__(self, env, start_response):
         self.env = env
+        status = self.next_status()
         req = Request(env)
         if env['REQUEST_METHOD'] == 'GET' or env['REQUEST_METHOD'] == 'HEAD':
-            if self.status == 200:
+            if status == 200:
                 if 'HTTP_RANGE' in env:
                     resp = Response(request=req, body=self.object_body,
                                     conditional_response=True)
@@ -152,35 +165,35 @@ class FakeAppObject(FakeApp):
                                self.response_headers.items())
                 if env['REQUEST_METHOD'] == 'GET':
                     return self.object_body
-            elif self.status == 401:
+            elif status == 401:
                 start_response(HTTPUnauthorized(request=req).status, [])
-            elif self.status == 403:
+            elif status == 403:
                 start_response(HTTPForbidden(request=req).status, [])
-            elif self.status == 404:
+            elif status == 404:
                 start_response(HTTPNotFound(request=req).status, [])
             else:
                 start_response(HTTPBadRequest(request=req).status, [])
         elif env['REQUEST_METHOD'] == 'PUT':
-            if self.status == 201:
+            if status == 201:
                 start_response(HTTPCreated(request=req).status,
                     [('etag', self.response_headers['etag']),
                      ('last-modified', self.response_headers['last-modified'])])
-            elif self.status == 401:
+            elif status == 401:
                 start_response(HTTPUnauthorized(request=req).status, [])
-            elif self.status == 403:
+            elif status == 403:
                 start_response(HTTPForbidden(request=req).status, [])
-            elif self.status == 404:
+            elif status == 404:
                 start_response(HTTPNotFound(request=req).status, [])
             else:
                 start_response(HTTPBadRequest(request=req).status, [])
         elif env['REQUEST_METHOD'] == 'DELETE':
-            if self.status == 204:
+            if status == 204:
                 start_response(HTTPNoContent(request=req).status, [])
-            elif self.status == 401:
+            elif status == 401:
                 start_response(HTTPUnauthorized(request=req).status, [])
-            elif self.status == 403:
+            elif status == 403:
                 start_response(HTTPForbidden(request=req).status, [])
-            elif self.status == 404:
+            elif status == 404:
                 start_response(HTTPNotFound(request=req).status, [])
             else:
                 start_response(HTTPBadRequest(request=req).status, [])
@@ -628,12 +641,32 @@ class TestSwift3(unittest.TestCase):
         self.assertEquals(code, 'InvalidURI')
 
     def test_object_DELETE(self):
-        local_app = swift3.filter_factory({})(FakeAppObject(204))
+        local_app = swift3.filter_factory({})(FakeAppObject([204, 201]))
         req = Request.blank('/bucket/object',
                             environ={'REQUEST_METHOD': 'DELETE'},
                             headers={'Authorization': 'AWS test:tester:hmac'})
         resp = local_app(req.environ, local_app.app.do_start_response)
         self.assertEquals(local_app.app.response_args[0].split()[0], '204')
+
+    @patch('datetime.datetime', FakeDatetime)
+    def test_object_DELETE_versioned(self):
+        from datetime import datetime as _dt_
+        FakeDatetime.now = classmethod(lambda cls: _dt_(2013, 5, 16, 18, 43, 1))
+        app = Mock(wraps=FakeAppObject(204))
+        local_app = swift3.filter_factory({})(app)
+        req = Request.blank('/bucket/object',
+                            environ={'REQUEST_METHOD': 'DELETE'},
+                            headers={'Authorization': 'AWS test:hmac'})
+        local_app(req.environ, local_app.app.do_start_response)
+        self.assertEquals(app.call_count, 2)
+        self.assertEquals(app.call_args_list[0][0][0]['REQUEST_METHOD'],
+                          'DELETE')
+        self.assertEquals(app.call_args_list[0][0][0]['PATH_INFO'],
+                          '/v1/test/bucket/object')
+        self.assertEquals(app.call_args_list[1][0][0]['REQUEST_METHOD'],
+                          'PUT')
+        self.assertEquals(app.call_args_list[1][0][0]['PATH_INFO'],
+                          '/v1/test/bucket_versions/object#1368722581.0#0')
 
     def test_object_multi_DELETE(self):
         local_app = swift3.filter_factory({})(FakeAppBucket())
