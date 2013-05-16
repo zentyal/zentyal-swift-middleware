@@ -1,0 +1,4 @@
+swift==1.8.0
+nose==1.1.2
+mock==1.0.1
+autonose==0.2.2
