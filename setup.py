@@ -25,6 +25,6 @@ setup(name='swift3',
       author_email='openstack@lists.launchpad.net',
       url='https://github.com/fujita/swift3',
       packages=['swift3'],
-      requires=['swift(>=1.4)'],
+      requires=['swift(>=1.4)', 'python_dateutil(>=2.1)'],
       entry_points={'paste.filter_factory':
                         ['swift3=swift3.middleware:filter_factory']})
