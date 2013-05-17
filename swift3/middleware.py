@@ -853,6 +853,9 @@ class ObjectController(BaseController):
             res = Response(status=HTTP_OK,
                            etag=self._response_header_value('etag'))
 
+        env['HTTP_X_COPY_FROM'] = '/' + self.container_name + \
+                                  '/' + self.object_name
+        env['CONTENT_LENGTH'] = '0'
         last_modified = self._response_header_value('last-modified')
         self.container_name = self._versioned_bucket_of(self.container_name)
         self.object_name = self._versioned_object_of(self.object_name,
@@ -861,6 +864,14 @@ class ObjectController(BaseController):
         status = self._get_status_int()
 
         if status != HTTP_CREATED:
+            # Delete file
+            env['REQUEST_METHOD'] = 'DELETE'
+            self.container_name, self.object_name = \
+                split_path(env['HTTP_X_COPY_FROM'], 2, rest_with_last=True)
+            del env['HTTP_X_COPY_FROM']
+            del env['CONTENT_LENGTH']
+            self._app_call(env)
+
             if status in (HTTP_UNAUTHORIZED, HTTP_FORBIDDEN):
                 return get_err_response('AccessDenied')
             elif status == HTTP_NOT_FOUND:

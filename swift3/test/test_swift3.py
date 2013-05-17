@@ -21,6 +21,7 @@ import hashlib
 
 import xml.dom.minidom
 import simplejson
+from cStringIO import StringIO
 
 from swift.common.swob import Request, Response, HTTPUnauthorized, \
     HTTPCreated,HTTPNoContent, HTTPAccepted, HTTPBadRequest, HTTPNotFound, \
@@ -40,6 +41,7 @@ class FakeApp(object):
         self.status = status
         if isinstance(status, list):
             self.status.reverse()
+        self.env = []
 
     def __call__(self, env, start_response):
         return "FAKE APP"
@@ -89,7 +91,7 @@ class FakeAppBucket(FakeApp):
                         ('lily', '2011-01-05T02:19:14.275290', 0, 3909))
 
     def __call__(self, env, start_response):
-        self.env = env
+        self.env.append(env)
         status = self.next_status()
         if env['REQUEST_METHOD'] == 'GET':
             if status == 200:
@@ -152,7 +154,7 @@ class FakeAppObject(FakeApp):
                                  'last-modified': '2011-01-05T02:19:14.275290'}
 
     def __call__(self, env, start_response):
-        self.env = env
+        self.env.append(env)
         status = self.next_status()
         req = Request(env)
         if env['REQUEST_METHOD'] == 'GET' or env['REQUEST_METHOD'] == 'HEAD':
@@ -485,7 +487,7 @@ class TestSwift3(unittest.TestCase):
         self.assertEquals(req.environ['PATH_INFO'], '/bucket name')
         local_app(req.environ, start_response)
         # Checking PATH_INFO is setted ok in ObjectController, still unquoted
-        self.assertEquals(fake_app_object.env['PATH_INFO'],
+        self.assertEquals(fake_app_object.env[0]['PATH_INFO'],
                           '/v1/test/bucket name')
 
     def test_object_with_url_encoded_characters(self):
@@ -497,7 +499,7 @@ class TestSwift3(unittest.TestCase):
         self.assertEquals(req.environ['PATH_INFO'], '/bucket_name/some name')
         local_app(req.environ, start_response)
         # Checking PATH_INFO is setted ok in ObjectController, still unquoted
-        self.assertEquals(fake_app_object.env['PATH_INFO'],
+        self.assertEquals(fake_app_object.env[0]['PATH_INFO'],
                           '/v1/test/bucket_name/some name')
 
     def _test_object_GETorHEAD(self, method):
@@ -602,6 +604,44 @@ class TestSwift3(unittest.TestCase):
                           '/v1/test/bucket/object')
         self.assertEquals(app.call_args_list[1][0][0]['PATH_INFO'],
                           '/v1/test/bucket_versions/object#1294190354.0#1')
+
+    def test_object_PUT_versions_error(self):
+        app = Mock(wraps=FakeAppObject([201, 401, 204]))
+        local_app = swift3.filter_factory({})(app)
+        req = Request.blank('/bucket/object',
+                            environ={'REQUEST_METHOD': 'PUT'},
+                            headers={'Authorization': 'AWS test:hmac'})
+        req.date = datetime.now()
+        req.content_type = 'text/plain'
+        local_app(req.environ, local_app.app.do_start_response)
+        self.assertEquals(app.call_count, 3)
+        self.assertEquals(app.call_args_list[0][0][0]['PATH_INFO'],
+                          '/v1/test/bucket/object')
+        self.assertEquals(app.call_args_list[0][0][0]['REQUEST_METHOD'], 'PUT')
+        self.assertEquals(app.call_args_list[1][0][0]['PATH_INFO'],
+                          '/v1/test/bucket_versions/object#1294190354.0#1')
+        self.assertEquals(app.call_args_list[1][0][0]['REQUEST_METHOD'], 'PUT')
+        self.assertEquals(app.call_args_list[2][0][0]['PATH_INFO'],
+                          '/v1/test/bucket/object')
+        self.assertEquals(app.call_args_list[2][0][0]['REQUEST_METHOD'],
+                          'DELETE')
+
+    def test_object_PUT_versions_keeps_data(self):
+        app = FakeAppObject(201)
+        local_app = swift3.filter_factory({})(app)
+        req = Request.blank('/bucket/object',
+                            environ={'REQUEST_METHOD': 'PUT'},
+                            headers={'Authorization': 'AWS test:hmac',
+                                     'wsgi.input': StringIO('data'),
+                                     'Content-Length': '4'})
+        local_app(req.environ, local_app.app.do_start_response)
+
+        self.assertEqual(app.env[0]['REQUEST_METHOD'], 'PUT')
+        self.assertEqual(app.env[0]['CONTENT_LENGTH'], '4')
+
+        self.assertEqual(app.env[1]['REQUEST_METHOD'], 'PUT')
+        self.assertEqual(app.env[1]['CONTENT_LENGTH'], '0')
+        self.assertEqual(app.env[1]['HTTP_X_COPY_FROM'], '/bucket/object')
 
     def test_object_PUT_headers(self):
         class FakeApp(object):
