@@ -74,23 +74,18 @@ fi
 cd $dest
 . bin/activate
 
-
 # Install requirements file
 echo "Installing dependencies"
 retry pip install --use-mirrors --download-cache=$PIP_CACHE -r $env/requirements.txt
-
-echo "Executing test..."
-cd ../..
-nosetests swift3
 
 if [ "$?" -eq 0 ]; then
     echo
     echo
     echo "================================================================"
-    echo "Virtualenv created!. Now you can:"
-    echo " cd $dest"
-    echo " source bin/activate"
+    echo "Virtualenv created!. Now you should execute:"
+    echo "  $ source $dest/bin/activate"
     echo "----------------------------------------------------------------"
     echo "To execute unit test, just use nosetests on root folder"
     echo "================================================================"
+    echo
 fi
