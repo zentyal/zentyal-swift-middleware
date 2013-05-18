@@ -4,3 +4,6 @@ python-dateutil==2.1
 nose==1.1.2
 mock==1.0.1
 autonose==0.2.2
+python-subunit==0.0.7
+junitxml==0.7
+
