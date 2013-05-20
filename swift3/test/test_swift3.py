@@ -28,6 +28,7 @@ from swift.common.swob import Request, Response, HTTPUnauthorized, \
     HTTPConflict, HTTPForbidden
 
 from swift3 import middleware as swift3
+from swift3.middleware import BucketController
 
 
 class FakeDatetime(datetime):
@@ -87,8 +88,8 @@ class FakeAppBucket(FakeApp):
     def __init__(self, status=200):
         super(FakeAppBucket, self).__init__(status)
         self.objects = (('rose', '2011-01-05T02:19:14.275290', 0, 303),
-                        ('viola', '2011-01-05T02:19:14.275290', 0, 3909),
-                        ('lily', '2011-01-05T02:19:14.275290', 0, 3909))
+                        ('viola', '2011-01-05T02:19:15.275290', 0, 3909),
+                        ('lily', '2011-01-05T02:19:16.275290', 0, 3909))
 
     def __call__(self, env, start_response):
         self.env.append(env)
@@ -313,6 +314,16 @@ class TestSwift3(unittest.TestCase):
         self.assertEquals(len(names), len(FakeAppBucket().objects))
         for i in FakeAppBucket().objects:
             self.assertTrue(i[0] in names)
+
+    def test_bucket_fetch_last_modified(self):
+        app = Mock(wraps=FakeAppBucket())
+        bc = BucketController({}, app, 'token', 'account', 'bucket')
+        last_modified = bc.fetch_last_modified_time({}, 'rose')
+
+        self.assertEqual(app.call_count, 1)
+        self.assertEqual(app.call_args_list[0][0][0]['QUERY_STRING'],
+                         "format=json&limit=1&prefix=rose")
+        self.assertEqual(last_modified, '2011-01-05T02:19:14.275290')
 
     def test_bucket_GET_is_truncated(self):
         local_app = swift3.filter_factory({})(FakeAppBucket())
@@ -599,11 +610,20 @@ class TestSwift3(unittest.TestCase):
         req.date = datetime.now()
         req.content_type = 'text/plain'
         local_app(req.environ, local_app.app.do_start_response)
-        self.assertEquals(app.call_count, 2)
+        self.assertEquals(app.call_count, 3)
+        # 1) Put object normal container
         self.assertEquals(app.call_args_list[0][0][0]['PATH_INFO'],
                           '/v1/test/bucket/object')
+        # 2) Listing to get timestamp
+        self.assertEquals(app.call_args_list[1][0][0]['REQUEST_METHOD'], 'GET')
+        self.assertEquals(app.call_args_list[1][0][0]['QUERY_STRING'],
+                          'format=json&limit=1&prefix=object')
         self.assertEquals(app.call_args_list[1][0][0]['PATH_INFO'],
-                          '/v1/test/bucket_versioned/object$1294190354.0$1')
+                          '/v1/test/bucket')
+        # 3) Put versioned object
+        self.assertEquals(app.call_args_list[2][0][0]['REQUEST_METHOD'], 'PUT')
+        self.assertEquals(app.call_args_list[2][0][0]['PATH_INFO'],
+                         '/v1/test/bucket_versioned/object$1294190354.275290$1')
 
     def test_object_PUT_versioned_error(self):
         app = Mock(wraps=FakeAppObject([201, 401, 204]))
@@ -614,16 +634,16 @@ class TestSwift3(unittest.TestCase):
         req.date = datetime.now()
         req.content_type = 'text/plain'
         local_app(req.environ, local_app.app.do_start_response)
-        self.assertEquals(app.call_count, 3)
+        self.assertEquals(app.call_count, 4)
         self.assertEquals(app.call_args_list[0][0][0]['PATH_INFO'],
                           '/v1/test/bucket/object')
         self.assertEquals(app.call_args_list[0][0][0]['REQUEST_METHOD'], 'PUT')
-        self.assertEquals(app.call_args_list[1][0][0]['PATH_INFO'],
-                          '/v1/test/bucket_versioned/object$1294190354.0$1')
-        self.assertEquals(app.call_args_list[1][0][0]['REQUEST_METHOD'], 'PUT')
         self.assertEquals(app.call_args_list[2][0][0]['PATH_INFO'],
+                         '/v1/test/bucket_versioned/object$1294190354.275290$1')
+        self.assertEquals(app.call_args_list[2][0][0]['REQUEST_METHOD'], 'PUT')
+        self.assertEquals(app.call_args_list[3][0][0]['PATH_INFO'],
                           '/v1/test/bucket/object')
-        self.assertEquals(app.call_args_list[2][0][0]['REQUEST_METHOD'],
+        self.assertEquals(app.call_args_list[3][0][0]['REQUEST_METHOD'],
                           'DELETE')
 
     def test_object_PUT_versioned_keeps_data(self):
@@ -639,9 +659,9 @@ class TestSwift3(unittest.TestCase):
         self.assertEqual(app.env[0]['REQUEST_METHOD'], 'PUT')
         self.assertEqual(app.env[0]['CONTENT_LENGTH'], '4')
 
-        self.assertEqual(app.env[1]['REQUEST_METHOD'], 'PUT')
-        self.assertEqual(app.env[1]['CONTENT_LENGTH'], '0')
-        self.assertEqual(app.env[1]['HTTP_X_COPY_FROM'], '/bucket/object')
+        self.assertEqual(app.env[2]['REQUEST_METHOD'], 'PUT')
+        self.assertEqual(app.env[2]['CONTENT_LENGTH'], '0')
+        self.assertEqual(app.env[2]['HTTP_X_COPY_FROM'], '/bucket/object')
 
     def test_object_PUT_headers(self):
         class FakeApp(object):

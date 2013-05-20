@@ -463,6 +463,16 @@ class BucketController(BaseController):
         conf = kwargs.get('conf', {})
         self.location = conf.get('location', 'US')
 
+    def fetch_last_modified_time(self, env, key):
+        env['REQUEST_METHOD'] = 'GET'
+        env['QUERY_STRING'] = 'format=json&limit=1&prefix=%s' % quote(key)
+        body_iter = self._app_call(env)
+        try:
+            # ISO format: '2013-05-20T16:20:27.690370' microseconds included
+            return loads(''.join(list(body_iter)))[0]['last_modified']
+        except:
+            return None
+
     def GET(self, env, start_response):
         """
         Handle GET Bucket (List Objects) request
@@ -830,6 +840,7 @@ class ObjectController(BaseController):
             elif key == 'HTTP_X_AMZ_COPY_SOURCE':
                 env['HTTP_X_COPY_FROM'] = value
 
+        # 1) Real PUT
         body_iter = self._app_call(env)
         status = self._get_status_int()
 
@@ -852,10 +863,19 @@ class ObjectController(BaseController):
             res = Response(status=HTTP_OK,
                            etag=self._response_header_value('etag'))
 
+        # 2) List Bucket to get timestamp with microseconds precision
+        # last-modified header only has seconds precision
+        tmp_env = env.copy()
+        bc = BucketController(tmp_env, self.app, env['HTTP_X_AUTH_TOKEN'],
+                              self.account_name, self.container_name)
+        last_modified = bc.fetch_last_modified_time(tmp_env, self.object_name)
+
+        # 3) and finally put versioned object
         env['HTTP_X_COPY_FROM'] = '/' + self.container_name + \
                                   '/' + self.object_name
         env['CONTENT_LENGTH'] = '0'
-        last_modified = self._response_header_value('last-modified')
+        if last_modified is None:
+            last_modified = self._response_header_value('last-modified')
         self.container_name = self._versioned_bucket_of(self.container_name)
         self.object_name = self._versioned_object_of(self.object_name,
                                                      last_modified)
