@@ -381,18 +381,14 @@ def validate_bucket_name(name):
 class BaseController(WSGIContext):
     VERSIONS_BUCKET_SUFFIX = '_versioned'
 
-    def __init__(self, app):
+    def __init__(self, env, app, token):
         super(BaseController, self).__init__(app)
+        env['HTTP_X_AUTH_TOKEN'] = token
 
     def _app_call(self, env):
         copy_env = env.copy()
-        self._set_token(copy_env)
         self._set_path_info(copy_env)
         return super(BaseController, self)._app_call(copy_env)
-
-    def _set_token(self, env):
-        token = base64.urlsafe_b64encode(canonical_string(Request(env)))
-        env['HTTP_X_AUTH_TOKEN'] = token
 
     def _set_path_info(self, env):
         account, container, object = self.account_name, None, None
@@ -418,8 +414,8 @@ class ServiceController(BaseController):
     """
     Handles account level requests.
     """
-    def __init__(self, app, account_name, **kwargs):
-        super(ServiceController, self).__init__(app)
+    def __init__(self, env, app, token, account_name, **kwargs):
+        super(ServiceController, self).__init__(env, app, token)
         self.account_name = unquote(account_name)
 
     def GET(self, env, start_response):
@@ -457,8 +453,8 @@ class BucketController(BaseController):
     """
     Handles bucket request.
     """
-    def __init__(self, app, account_name, container_name, **kwargs):
-        super(BucketController, self).__init__(app)
+    def __init__(self, env, app, token, account_name, container_name, **kwargs):
+        super(BucketController, self).__init__(env, app, token)
 
         self.account_name = unquote(account_name)
         self.container_name = unquote(container_name)
@@ -703,7 +699,9 @@ class BucketController(BaseController):
             del tmp_env['QUERY_STRING']
             tmp_env['CONTENT_LENGTH'] = '0'
             tmp_env['REQUEST_METHOD'] = 'DELETE'
-            controller = ObjectController(self.app, self.account_name,
+            controller = ObjectController(tmp_env, self.app,
+                                          env['HTTP_X_AUTH_TOKEN'],
+                                          self.account_name,
                                           self.container_name, key)
             controller._app_call(tmp_env)
             status = controller._get_status_int()
@@ -746,9 +744,9 @@ class ObjectController(BaseController):
     """
     Handles requests on objects
     """
-    def __init__(self, app, account_name, container_name, object_name,
-                 **kwargs):
-        super(ObjectController, self).__init__(app)
+    def __init__(self, env, app, token, account_name, container_name,
+                 object_name, **kwargs):
+        super(ObjectController, self).__init__(env, app, token)
         self.account_name = unquote(account_name)
         self.container_name = unquote(container_name)
         self.object_name = unquote(object_name)
@@ -915,7 +913,7 @@ class ObjectController(BaseController):
             if status in (HTTP_UNAUTHORIZED, HTTP_FORBIDDEN):
                 return get_err_response('AccessDenied')
             elif status == HTTP_NOT_FOUND:
-                return get_err_response('NoSuchBucket')
+                return get_err_response('NoSuchKey')
             elif status == HTTP_UNPROCESSABLE_ENTITY:
                 return get_err_response('InvalidDigest')
             else:
@@ -1013,7 +1011,8 @@ class Swift3Middleware(object):
                 return get_err_response('RequestTimeTooSkewed')(env,
                                                                 start_response)
 
-        controller = controller(self.app, account, conf=self.conf,
+        token = base64.urlsafe_b64encode(canonical_string(req))
+        controller = controller(env, self.app, token, account, conf=self.conf,
                                 **path_parts)
 
         if hasattr(controller, req.method):
