@@ -379,7 +379,7 @@ def validate_bucket_name(name):
         return True
 
 class BaseController(WSGIContext):
-    VERSIONS_BUCKET_SUFFIX = '_versions'
+    VERSIONS_BUCKET_SUFFIX = '_versioned'
 
     def __init__(self, app):
         super(BaseController, self).__init__(app)
@@ -408,7 +408,7 @@ class BaseController(WSGIContext):
         if isinstance(last_modified, basestring):
             last_modified = parse(last_modified)
         timestamp = mktime(last_modified.timetuple())
-        return "%s#%s#%s" % (key, timestamp, deleted and "0" or "1")
+        return "%s$%s$%s" % (key, timestamp, deleted and "0" or "1")
 
     def _versioned_bucket_of(self, bucket):
         return bucket + self.VERSIONS_BUCKET_SUFFIX

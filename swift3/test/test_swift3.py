@@ -418,7 +418,7 @@ class TestSwift3(unittest.TestCase):
         resp = local_app(req.environ, local_app.app.do_start_response)
         self.assertEquals(local_app.app.response_args[0].split()[0], '200')
 
-    def test_bucket_PUT_versions(self):
+    def test_bucket_PUT_versioned(self):
         app = Mock(wraps=FakeAppBucket(201))
         local_app = swift3.filter_factory({})(app)
         req = Request.blank('/bucket',
@@ -429,7 +429,7 @@ class TestSwift3(unittest.TestCase):
         self.assertEquals(app.call_args_list[0][0][0]['PATH_INFO'],
                           '/v1/test/bucket')
         self.assertEquals(app.call_args_list[1][0][0]['PATH_INFO'],
-                          '/v1/test/bucket_versions')
+                          '/v1/test/bucket_versioned')
 
     def test_bucket_DELETE_error(self):
         code = self._test_method_error(FakeAppBucket, 'DELETE', '/bucket', 401)
@@ -590,7 +590,7 @@ class TestSwift3(unittest.TestCase):
         self.assertEquals(headers['etag'],
                           "\"%s\"" % local_app.app.response_headers['etag'])
 
-    def test_object_PUT_versions(self):
+    def test_object_PUT_versioned(self):
         app = Mock(wraps=FakeAppObject(201))
         local_app = swift3.filter_factory({})(app)
         req = Request.blank('/bucket/object',
@@ -603,9 +603,9 @@ class TestSwift3(unittest.TestCase):
         self.assertEquals(app.call_args_list[0][0][0]['PATH_INFO'],
                           '/v1/test/bucket/object')
         self.assertEquals(app.call_args_list[1][0][0]['PATH_INFO'],
-                          '/v1/test/bucket_versions/object#1294190354.0#1')
+                          '/v1/test/bucket_versioned/object$1294190354.0$1')
 
-    def test_object_PUT_versions_error(self):
+    def test_object_PUT_versioned_error(self):
         app = Mock(wraps=FakeAppObject([201, 401, 204]))
         local_app = swift3.filter_factory({})(app)
         req = Request.blank('/bucket/object',
@@ -619,14 +619,14 @@ class TestSwift3(unittest.TestCase):
                           '/v1/test/bucket/object')
         self.assertEquals(app.call_args_list[0][0][0]['REQUEST_METHOD'], 'PUT')
         self.assertEquals(app.call_args_list[1][0][0]['PATH_INFO'],
-                          '/v1/test/bucket_versions/object#1294190354.0#1')
+                          '/v1/test/bucket_versioned/object$1294190354.0$1')
         self.assertEquals(app.call_args_list[1][0][0]['REQUEST_METHOD'], 'PUT')
         self.assertEquals(app.call_args_list[2][0][0]['PATH_INFO'],
                           '/v1/test/bucket/object')
         self.assertEquals(app.call_args_list[2][0][0]['REQUEST_METHOD'],
                           'DELETE')
 
-    def test_object_PUT_versions_keeps_data(self):
+    def test_object_PUT_versioned_keeps_data(self):
         app = FakeAppObject(201)
         local_app = swift3.filter_factory({})(app)
         req = Request.blank('/bucket/object',
@@ -706,7 +706,7 @@ class TestSwift3(unittest.TestCase):
         self.assertEquals(app.call_args_list[1][0][0]['REQUEST_METHOD'],
                           'PUT')
         self.assertEquals(app.call_args_list[1][0][0]['PATH_INFO'],
-                          '/v1/test/bucket_versions/object#1368722581.0#0')
+                          '/v1/test/bucket_versioned/object$1368722581.0$0')
 
     def test_object_multi_DELETE(self):
         local_app = swift3.filter_factory({})(FakeAppBucket())
