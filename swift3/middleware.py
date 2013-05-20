@@ -403,8 +403,9 @@ class BaseController(WSGIContext):
         # TODO regex last_modified
         if isinstance(last_modified, basestring):
             last_modified = parse(last_modified)
-        timestamp = mktime(last_modified.timetuple())
-        return "%s$%s$%s" % (key, timestamp, deleted and "0" or "1")
+        timestamp = mktime(last_modified.timetuple()) + \
+                    last_modified.microsecond / 1e6
+        return "%s$%.6f$%s" % (key, timestamp, deleted and "0" or "1")
 
     def _versioned_bucket_of(self, bucket):
         return bucket + self.VERSIONS_BUCKET_SUFFIX

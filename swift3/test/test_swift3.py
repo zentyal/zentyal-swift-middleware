@@ -706,7 +706,7 @@ class TestSwift3(unittest.TestCase):
         self.assertEquals(app.call_args_list[1][0][0]['REQUEST_METHOD'],
                           'PUT')
         self.assertEquals(app.call_args_list[1][0][0]['PATH_INFO'],
-                          '/v1/test/bucket_versioned/object$1368722581.0$0')
+                         '/v1/test/bucket_versioned/object$1368722581.000000$0')
 
     def test_object_multi_DELETE(self):
         local_app = swift3.filter_factory({})(FakeAppBucket())
