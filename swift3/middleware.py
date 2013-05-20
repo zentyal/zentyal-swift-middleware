@@ -289,7 +289,7 @@ def canonical_string(req):
         keywords = sorted(['acl', 'delete', 'lifecycle', 'location', 'logging',
             'notification', 'partNumber', 'policy', 'requestPayment',
             'torrent', 'uploads', 'uploadId', 'versionId', 'versioning',
-            'versions ', 'website'])
+            'versions', 'website'])
         for key in qdict:
             if key in keywords:
                 newstr = key

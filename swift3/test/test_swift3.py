@@ -750,6 +750,11 @@ class TestSwift3(unittest.TestCase):
                 {'Content-Type': 'text/plain', 'X-Amz-Something': 'test',
                  'Date': 'whatever'})
 
+        verify('1353e2ff18f7ed9b6d50c38fb66d57e6', '/bucket', {})
+        verify('1353e2ff18f7ed9b6d50c38fb66d57e6', '/bucket?useless=2', {})
+        verify('5b4e1d07e942bf7e2b5ebd0bae007f35', '/bucket/?versions', {})
+        verify('5b4e1d07e942bf7e2b5ebd0bae007f35', '/bucket/?versions&foo', {})
+
         verify('c8447135da232ae7517328f3429df481', '/bucket/object',
                 {'Content-Type': 'text/plain', 'X-Amz-Something': 'test'})
 
