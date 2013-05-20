@@ -77,10 +77,15 @@ from swift.common.http import HTTP_OK, HTTP_CREATED, HTTP_ACCEPTED, \
 
 MAX_BUCKET_LISTING = 1000
 
-def tostr(string):
+def to_str(string):
     if isinstance(string, unicode):
         return string.encode('utf8')
     return string
+
+def to_timestamp(last_modified):
+    if isinstance(last_modified, basestring):
+        last_modified = parse(last_modified)
+    return mktime(last_modified.timetuple()) + last_modified.microsecond / 1e6
 
 def get_err_response(code):
     """
@@ -401,11 +406,8 @@ class BaseController(WSGIContext):
 
     def _versioned_object_of(self, key, last_modified, deleted=False):
         # TODO regex last_modified
-        if isinstance(last_modified, basestring):
-            last_modified = parse(last_modified)
-        timestamp = mktime(last_modified.timetuple()) + \
-                    last_modified.microsecond / 1e6
-        return "%s$%.6f$%s" % (key, timestamp, deleted and "0" or "1")
+        return "%s$%.6f$%s" % (key, to_timestamp(last_modified),
+                               "0" if deleted else "1")
 
     def _versioned_bucket_of(self, bucket):
         return bucket + self.VERSIONS_BUCKET_SUFFIX
@@ -489,36 +491,12 @@ class BucketController(BaseController):
         max_keys = min(int(args.get('max-keys', MAX_BUCKET_LISTING)),
                        MAX_BUCKET_LISTING)
 
-        if 'acl' not in args:
-            #acl request sent with format=json etc confuses swift
-            env['QUERY_STRING'] = 'format=json&limit=%s' % (max_keys + 1)
-        if 'marker' in args:
-            env['QUERY_STRING'] += '&marker=%s' % quote(args['marker'])
-        if 'prefix' in args:
-            env['QUERY_STRING'] += '&prefix=%s' % quote(args['prefix'])
-        if 'delimiter' in args:
-            env['QUERY_STRING'] += '&delimiter=%s' % quote(args['delimiter'])
-
-        body_iter = self._app_call(env)
-        status = self._get_status_int()
-        headers = dict(self._response_headers)
-
-        if is_success(status) and 'acl' in args:
-            return get_acl(self.account_name, headers)
-
         if 'versioning' in args:
-            # Just report there is no versioning configured here.
             body = ('<VersioningConfiguration '
-                    'xmlns="http://s3.amazonaws.com/doc/2006-03-01/"/>')
+                    'xmlns="http://s3.amazonaws.com/doc/2006-03-01/">'
+                    '<Status>Enabled</Status>'
+                    '</VersioningConfiguration>')
             return Response(body=body, content_type="text/plain")
-
-        if status != HTTP_OK:
-            if status in (HTTP_UNAUTHORIZED, HTTP_FORBIDDEN):
-                return get_err_response('AccessDenied')
-            elif status == HTTP_NOT_FOUND:
-                return get_err_response('NoSuchBucket')
-            else:
-                return get_err_response('InvalidURI')
 
         if 'location' in args:
             body = ('<?xml version="1.0" encoding="UTF-8"?>'
@@ -537,10 +515,173 @@ class BucketController(BaseController):
                     'xmlns="http://doc.s3.amazonaws.com/2006-03-01" />')
             return Response(body=body, content_type='application/xml')
 
+        if 'acl' not in args:
+            # acl request sent with format=json etc confuses swift
+            env['QUERY_STRING'] = 'format=json&limit=%s' % (max_keys + 1)
+        if 'marker' in args:
+            env['QUERY_STRING'] += '&marker=%s' % quote(args['marker'])
+        if 'prefix' in args:
+            env['QUERY_STRING'] += '&prefix=%s' % quote(args['prefix'])
+        if 'delimiter' in args:
+            env['QUERY_STRING'] += '&delimiter=%s' % quote(args['delimiter'])
+
+        body_iter = self._app_call(env)
+        status = self._get_status_int()
+        headers = dict(self._response_headers)
+
+        if is_success(status) and 'acl' in args:
+            return get_acl(self.account_name, headers)
+
+        if status != HTTP_OK:
+            if status in (HTTP_UNAUTHORIZED, HTTP_FORBIDDEN):
+                return get_err_response('AccessDenied')
+            elif status == HTTP_NOT_FOUND:
+                return get_err_response('NoSuchBucket')
+            else:
+                return get_err_response('InvalidURI')
+
         objects = loads(''.join(list(body_iter)))
-        body = ('<?xml version="1.0" encoding="UTF-8"?>'
-                '<ListBucketResult '
-                'xmlns="http://s3.amazonaws.com/doc/2006-03-01">'
+
+        if 'versions' in args:
+            self.container_name = self._versioned_bucket_of(self.container_name)
+            body_iter = self._app_call(env)
+            status = self._get_status_int()
+            if status != HTTP_OK:
+                if status in (HTTP_UNAUTHORIZED, HTTP_FORBIDDEN):
+                    return get_err_response('AccessDenied')
+                elif status == HTTP_NOT_FOUND:
+                    return get_err_response('NoSuchBucket')
+                else:
+                    return get_err_response('InvalidURI')
+            vobjects = loads(''.join(list(body_iter)))
+            body = self._list_versions_results(max_keys, args, objects,
+                                               vobjects)
+        else:
+            body = self._list_bucket_results(max_keys, args, objects)
+
+        return Response(body=body, content_type='application/xml')
+
+    def _list_versions_results(self, max_keys, args, objects, vobjects):
+        # Current objects
+        objs = [('<Version>'
+                    '<Key>%s</Key>'
+                    '<VersionId>%s</VersionId>'
+                    '<IsLatest>%s</IsLatest>'
+                    '<LastModified>%s</LastModified>'
+                    '<ETag>&quot;%s&quot;</ETag>'
+                    '<Size>%s</Size>'
+                    '<StorageClass>STANDARD</StorageClass>'
+                    '<Owner>'
+                        '<ID>%s</ID>'
+                        '<DisplayName>%s</DisplayName>'
+                    '</Owner>'
+                '</Version>') % (
+                xml_escape(to_str(o['name'])),
+                to_timestamp(o['last_modified']),
+                'true',
+                o['last_modified'],
+                o['hash'],
+                o['bytes'],
+                self.account_name, self.account_name)
+                for o in objects if 'subdir' not in o]
+        # Versioned objects
+        token_separator = '$'
+        for o in vobjects:
+            if 'subdir' in o:
+                continue
+            parts = to_str(o['name']).split(token_separator)
+            deleted = parts[-1] == '0'
+            timestamp = parts[-2]
+            name = token_separator.join(parts[0:-2])
+            if deleted:
+                objs.append(
+                    '<DeleteMarker>'
+                        '<Key>%s</Key>'
+                        '<VersionId>%s</VersionId>'
+                        '<IsLatest>%s</IsLatest>'
+                        '<LastModified>%s</LastModified>'
+                    '</DeleteMarker>' % (
+                    name,
+                    timestamp,
+                    'false', # FIXME
+                    o['last_modified']
+                ))
+            else:
+                objs.append(
+                    '<Version>'
+                        '<Key>%s</Key>'
+                        '<VersionId>%s</VersionId>'
+                        '<IsLatest>%s</IsLatest>'
+                        '<LastModified>%s</LastModified>'
+                        '<ETag>&quot;%s&quot;</ETag>'
+                        '<Size>%s</Size>'
+                        '<StorageClass>STANDARD</StorageClass>'
+                        '<Owner>'
+                            '<ID>%s</ID>'
+                            '<DisplayName>%s</DisplayName>'
+                        '</Owner>'
+                    '</Version>' % (
+                    name,
+                    timestamp,
+                    'false',
+                    o['last_modified'],
+                    o['hash'],
+                    o['bytes'],
+                    self.account_name, self.account_name
+                ))
+        common_prefixes = [
+            '<CommonPrefixes><Prefix>%s</Prefix></CommonPrefixes>' %
+            xml_escape(to_str(i['subdir']))
+            for i in objects[:max_keys] if 'subdir' in i]
+        xml = ('<?xml version="1.0" encoding="UTF-8"?>'
+            '<ListVersionsResult xmlns="http://s3.amazonaws.com/doc/2006-03-01">'
+                '<Prefix>%s</Prefix>'
+                '<KeyMarker>%s</KeyMarker>'
+                '<VersionIdMarker>%s</VersionIdMarker>'
+                '<Delimiter>%s</Delimiter>'
+                '<IsTruncated>%s</IsTruncated>'
+                '<MaxKeys>%s</MaxKeys>'
+                '<Name>%s</Name>'
+                '%s'
+                '%s'
+            '</ListVersionsResult>' % (
+            xml_escape(args.get('prefix', '')),
+            xml_escape(args.get('key-marker', '')),
+            xml_escape(args.get('version-id-marker', '')),
+            xml_escape(args.get('delimiter', '')),
+            'true' if len(objs) >= (max_keys + 1) else 'false',
+            max_keys,
+            xml_escape(self.container_name),
+            "".join(objs),
+            "".join(common_prefixes)
+        ))
+        return xml
+
+    def _list_bucket_results(self, max_keys, args, objects):
+        contents = [(
+            '<Contents>'
+                '<Key>%s</Key>'
+                '<LastModified>%sZ</LastModified>'
+                '<ETag>%s</ETag>'
+                '<Size>%s</Size>'
+                '<StorageClass>STANDARD</StorageClass>'
+                '<Owner>'
+                    '<ID>%s</ID>'
+                    '<DisplayName>%s</DisplayName>'
+                '</Owner>'
+            '</Contents>') % (
+            xml_escape(to_str(i['name'])),
+            i['last_modified'],
+            i['hash'],
+            i['bytes'],
+            self.account_name, self.account_name)
+            for i in objects[:max_keys] if 'subdir' not in i]
+        common_prefixes = [
+            '<CommonPrefixes><Prefix>%s</Prefix></CommonPrefixes>' %
+            xml_escape(to_str(i['subdir']))
+            for i in objects[:max_keys] if 'subdir' in i]
+        xml = ('<?xml version="1.0" encoding="UTF-8"?>'
+            '<ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01">'
                 '<Prefix>%s</Prefix>'
                 '<Marker>%s</Marker>'
                 '<Delimiter>%s</Delimiter>'
@@ -549,27 +690,18 @@ class BucketController(BaseController):
                 '<Name>%s</Name>'
                 '%s'
                 '%s'
-                '</ListBucketResult>' %
-                (
-                xml_escape(args.get('prefix', '')),
-                xml_escape(args.get('marker', '')),
-                xml_escape(args.get('delimiter', '')),
-                'true' if max_keys > 0 and len(objects) == (max_keys + 1) else
-                'false',
-                max_keys,
-                xml_escape(self.container_name),
-                "".join(['<Contents><Key>%s</Key><LastModified>%sZ</LastModif'
-                        'ied><ETag>%s</ETag><Size>%s</Size><StorageClass>STA'
-                        'NDARD</StorageClass><Owner><ID>%s</ID><DisplayName>'
-                        '%s</DisplayName></Owner></Contents>' %
-                        (xml_escape(tostr(i['name'])), i['last_modified'],
-                         i['hash'],
-                         i['bytes'], self.account_name, self.account_name)
-                         for i in objects[:max_keys] if 'subdir' not in i]),
-                "".join(['<CommonPrefixes><Prefix>%s</Prefix></CommonPrefixes>'
-                         % xml_escape(tostr(i['subdir']))
-                         for i in objects[:max_keys] if 'subdir' in i])))
-        return Response(body=body, content_type='application/xml')
+            '</ListBucketResult>' % (
+            xml_escape(args.get('prefix', '')),
+            xml_escape(args.get('marker', '')),
+            xml_escape(args.get('delimiter', '')),
+            'true' if max_keys > 0 and len(objects) == (max_keys + 1) else
+            'false',
+            max_keys,
+            xml_escape(self.container_name),
+            "".join(contents),
+            "".join(common_prefixes)
+        ))
+        return xml
 
     def PUT(self, env, start_response):
         """
