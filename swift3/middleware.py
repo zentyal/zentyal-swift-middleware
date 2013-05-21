@@ -78,11 +78,18 @@ from swift.common.http import HTTP_OK, HTTP_CREATED, HTTP_ACCEPTED, \
 MAX_BUCKET_LISTING = 1000
 
 def to_str(string):
+    """Encode if needed with utf8 into str"""
     if isinstance(string, unicode):
         return string.encode('utf8')
     return string
 
 def to_timestamp(last_modified):
+    """
+    Returns seconds of a datetime since epoch
+
+    :param last_modified: either string in iso format or datetime object
+    :returns: float
+    """
     if isinstance(last_modified, basestring):
         last_modified = parse(last_modified)
     return mktime(last_modified.timetuple()) + last_modified.microsecond / 1e6
@@ -92,7 +99,7 @@ def get_err_response(code):
     Given an HTTP response code, create a properly formatted xml error response
 
     :param code: error code
-    :returns: webob.response object
+    :returns: swift.common.swob.Response object
     """
     error_table = {
         'AccessDenied':
@@ -405,11 +412,24 @@ class BaseController(WSGIContext):
         env['PATH_INFO'] = '/v1/%s' % path
 
     def _versioned_object_of(self, key, last_modified, deleted=False):
+        """
+        Get versioned key given either a last_modified string (ISO datetime
+        format) or datetime which will be its versionId
+        """
         # TODO regex last_modified
-        return "%s$%.6f$%s" % (key, to_timestamp(last_modified),
-                               "0" if deleted else "1")
+        version_id = "%.6f" % to_timestamp(last_modified)
+        return self._versioned_object_at(key, version_id, deleted)
+
+    def _versioned_object_at(self, key, version_id, deleted=False):
+        """
+        Get versioned object get given the versionId
+        """
+        return "%s$%s$%s" % (key, version_id, "0" if deleted else "1")
 
     def _versioned_bucket_of(self, bucket):
+        """
+        Get versioned bucket name of another
+        """
         return bucket + self.VERSIONS_BUCKET_SUFFIX
 
 
@@ -974,7 +994,14 @@ class ObjectController(BaseController):
                 if env['HTTP_ETAG'] == '':
                     return get_err_response('SignatureDoesNotMatch')
             elif key == 'HTTP_X_AMZ_COPY_SOURCE':
-                env['HTTP_X_COPY_FROM'] = value
+                if '?versionId=' in value:
+                    # Copy from older version
+                    bucket, obj = split_path(value, 2, rest_with_last=True)
+                    copy_from = '/' + self._versioned_bucket_of(bucket) + '/' +\
+                        self._versioned_object_at(*obj.split('?versionId=', 1))
+                    env['HTTP_X_COPY_FROM'] = copy_from
+                else:
+                    env['HTTP_X_COPY_FROM'] = value
 
         # 1) Real PUT
         body_iter = self._app_call(env)
@@ -991,9 +1018,10 @@ class ObjectController(BaseController):
                 return get_err_response('InvalidURI')
 
         if 'HTTP_X_COPY_FROM' in env:
-            body = '<CopyObjectResult>' \
-                   '<ETag>"%s"</ETag>' \
-                   '</CopyObjectResult>' % self._response_header_value('etag')
+            body = '<CopyObjectResult><LastModified>%sZ</LastModified>' \
+                   '<ETag>"%s"</ETag></CopyObjectResult>' % \
+                   (self._response_header_value('last-modified'),
+                    self._response_header_value('etag'))
             res = Response(status=HTTP_OK, body=body)
         else:
             res = Response(status=HTTP_OK,

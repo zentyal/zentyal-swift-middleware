@@ -723,6 +723,37 @@ class TestSwift3(unittest.TestCase):
         self.assertEquals(app.req.headers['X-Object-Meta-Something'], 'oh hai')
         self.assertEquals(app.req.headers['X-Copy-From'], '/some/source')
 
+    def test_object_PUT_copy_from(self):
+        local_app = swift3.filter_factory({})(FakeAppObject(201))
+        req = Request.blank('/bucket/object',
+                            environ={'REQUEST_METHOD': 'PUT',
+                                     'HTTP_X_AMZ_COPY_SOURCE': '/bucket/foo'},
+                            headers={'Authorization': 'AWS test:hmac'})
+
+        resp = local_app(req.environ, local_app.app.do_start_response)
+
+        self.assertEqual(local_app.app.env[0]["HTTP_X_COPY_FROM"],
+                         '/bucket/foo')
+
+        dom = xml.dom.minidom.parseString("".join(resp))
+        self.assertEquals(dom.firstChild.nodeName, 'CopyObjectResult')
+        self.assertTrue(dom.getElementsByTagName("ETag") is not None)
+        self.assertTrue(dom.getElementsByTagName("LastModified") is not None)
+
+    def test_object_PUT_copy_from_with_versionId(self):
+        local_app = swift3.filter_factory({})(FakeAppObject(201))
+        req = Request.blank('/bucket/object',
+                            environ={'REQUEST_METHOD': 'PUT',
+                                     'HTTP_X_AMZ_COPY_SOURCE':
+                                     '/bucket/foo?versionId=123456789.123456'},
+                            headers={'Authorization': 'AWS test:hmac'})
+
+        resp = local_app(req.environ, local_app.app.do_start_response)
+        dom = xml.dom.minidom.parseString("".join(resp))
+        self.assertEquals(dom.firstChild.nodeName, 'CopyObjectResult')
+        self.assertEqual(local_app.app.env[0]["HTTP_X_COPY_FROM"],
+                         '/bucket_versioned/foo$123456789.123456$1')
+
     def test_object_DELETE_error(self):
         code = self._test_method_error(FakeAppObject, 'DELETE',
                                        '/bucket/object', 401)
