@@ -550,6 +550,16 @@ class TestSwift3(unittest.TestCase):
         self.assertEquals(fake_app_object.env[0]['PATH_INFO'],
                           '/v1/test/bucket_name/some name')
 
+    def test_object_GET_with_versionId(self):
+        local_app = swift3.filter_factory({})(FakeAppObject())
+        req = Request.blank('/bucket/object?versionId=123456789.123456',
+                            environ={'REQUEST_METHOD': 'GET'},
+                            headers={'Authorization': 'AWS test:hmac'})
+        local_app(req.environ, local_app.app.do_start_response)
+
+        self.assertEqual(local_app.app.env[0]["PATH_INFO"],
+                         '/v1/test/bucket_versioned/object$123456789.123456$1')
+
     def _test_object_GETorHEAD(self, method):
         local_app = swift3.filter_factory({})(FakeAppObject())
         req = Request.blank('/bucket/object',

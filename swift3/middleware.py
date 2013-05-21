@@ -934,6 +934,11 @@ class ObjectController(BaseController):
             env['SCRIPT_NAME'] = ''
             env['QUERY_STRING'] = ''
 
+        if 'versionId' in args:
+            self.container_name = self._versioned_bucket_of(self.container_name)
+            self.object_name = self._versioned_object_at(self.object_name,
+                                                         args['versionId'])
+
         app_iter = self._app_call(env)
         status = self._get_status_int()
         headers = dict(self._response_headers)
