@@ -356,6 +356,12 @@ class TestSwift3(unittest.TestCase):
                           len(FakeAppBucket().vobjects))
         self.assertEquals(len(dobjects), 1)
 
+        for o in objects:
+            for node in o.childNodes:
+                if node.nodeName =='LastModified':
+                    self.assertTrue(node.childNodes[0].nodeValue.endswith('Z'))
+                    break
+
     def test_bucket_GET_is_truncated(self):
         local_app = swift3.filter_factory({})(FakeAppBucket())
         bucket_name = 'junk'

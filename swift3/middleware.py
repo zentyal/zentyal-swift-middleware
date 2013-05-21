@@ -569,7 +569,7 @@ class BucketController(BaseController):
                     '<Key>%s</Key>'
                     '<VersionId>%s</VersionId>'
                     '<IsLatest>%s</IsLatest>'
-                    '<LastModified>%s</LastModified>'
+                    '<LastModified>%sZ</LastModified>'
                     '<ETag>&quot;%s&quot;</ETag>'
                     '<Size>%s</Size>'
                     '<StorageClass>STANDARD</StorageClass>'
@@ -603,7 +603,7 @@ class BucketController(BaseController):
                         '<Key>%s</Key>'
                         '<VersionId>%s</VersionId>'
                         '<IsLatest>%s</IsLatest>'
-                        '<LastModified>%s</LastModified>'
+                        '<LastModified>%sZ</LastModified>'
                     '</DeleteMarker>' % (
                     name,
                     timestamp,
@@ -616,7 +616,7 @@ class BucketController(BaseController):
                         '<Key>%s</Key>'
                         '<VersionId>%s</VersionId>'
                         '<IsLatest>%s</IsLatest>'
-                        '<LastModified>%s</LastModified>'
+                        '<LastModified>%sZ</LastModified>'
                         '<ETag>&quot;%s&quot;</ETag>'
                         '<Size>%s</Size>'
                         '<StorageClass>STANDARD</StorageClass>'
