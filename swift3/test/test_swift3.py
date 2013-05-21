@@ -90,6 +90,13 @@ class FakeAppBucket(FakeApp):
         self.objects = (('rose', '2011-01-05T02:19:14.275290', 0, 303),
                         ('viola', '2011-01-05T02:19:15.275290', 0, 3909),
                         ('lily', '2011-01-05T02:19:16.275290', 0, 3909))
+        self.vobjects = (
+            ('rose$1294190354.275290$1', '2011-01-05T02:19:14.123456', 0, 303),
+            ('viola$1294190355.275290$1', '2011-01-05T02:19:15.275290', 0, 3909),
+            ('lily$1294190356.275290$1', '2011-01-05T02:19:16.275290', 0, 3909),
+            ('rose$1294190353.123456$1', '2011-01-05T02:19:13.123456', 0, 302),
+            ('rose$1294190352.123456$0', '2011-01-05T02:19:12.123456', 0, 0),
+            ('rose$1294190351.123456$1', '2011-01-05T02:19:11.123456', 0, 301))
 
     def __call__(self, env, start_response):
         self.env.append(env)
@@ -102,7 +109,11 @@ class FakeAppBucket(FakeApp):
                                 '"bytes":%s']
                 json_pattern = '{' + ','.join(json_pattern) + '}'
                 json_out = []
-                for b in self.objects:
+                if '_versioned' in env['PATH_INFO']:
+                    objects = self.vobjects
+                else:
+                    objects = self.objects
+                for b in objects:
                     name = simplejson.dumps(b[0])
                     time = simplejson.dumps(b[1])
                     json_out.append(json_pattern %
@@ -324,6 +335,26 @@ class TestSwift3(unittest.TestCase):
         self.assertEqual(app.call_args_list[0][0][0]['QUERY_STRING'],
                          "format=json&limit=1&prefix=rose")
         self.assertEqual(last_modified, '2011-01-05T02:19:14.275290')
+
+    def test_bucket_GET_versions(self):
+        app = Mock(wraps=FakeAppBucket())
+        local_app = swift3.filter_factory({})(app)
+        bucket_name = 'junk'
+        req = Request.blank('/%s?versions' % bucket_name,
+                            environ={'REQUEST_METHOD': 'GET'},
+                            headers={'Authorization': 'AWS test:tester:hmac'})
+        resp = local_app(req.environ, local_app.app.do_start_response)
+
+        dom = xml.dom.minidom.parseString("".join(resp))
+        self.assertEquals(dom.firstChild.nodeName, 'ListVersionsResult')
+        name = dom.getElementsByTagName('Name')[0].childNodes[0].nodeValue
+        self.assertEquals(name, bucket_name)
+
+        objects = [n for n in dom.getElementsByTagName('Version')]
+        dobjects = [n for n in dom.getElementsByTagName('DeleteMarker')]
+        self.assertEquals(len(objects) + len(dobjects),
+                          len(FakeAppBucket().vobjects))
+        self.assertEquals(len(dobjects), 1)
 
     def test_bucket_GET_is_truncated(self):
         local_app = swift3.filter_factory({})(FakeAppBucket())

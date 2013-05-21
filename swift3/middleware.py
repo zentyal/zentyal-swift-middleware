@@ -562,6 +562,8 @@ class BucketController(BaseController):
         return Response(body=body, content_type='application/xml')
 
     def _list_versions_results(self, max_keys, args, objects, vobjects):
+        currents = {to_str(o['name']): to_timestamp(o['last_modified'])
+                    for o in objects if 'subdir' not in o}
         # Current objects
         objs = [('<Version>'
                     '<Key>%s</Key>'
@@ -593,6 +595,8 @@ class BucketController(BaseController):
             deleted = parts[-1] == '0'
             timestamp = parts[-2]
             name = token_separator.join(parts[0:-2])
+            if name in currents and float(timestamp) == currents[name]:
+                continue
             if deleted:
                 objs.append(
                     '<DeleteMarker>'
@@ -651,7 +655,7 @@ class BucketController(BaseController):
             xml_escape(args.get('delimiter', '')),
             'true' if len(objs) >= (max_keys + 1) else 'false',
             max_keys,
-            xml_escape(self.container_name),
+            xml_escape(self.container_name.split(self.VERSIONS_BUCKET_SUFFIX)[0]),
             "".join(objs),
             "".join(common_prefixes)
         ))
