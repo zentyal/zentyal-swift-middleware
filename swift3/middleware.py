@@ -496,6 +496,23 @@ class BucketController(BaseController):
         except:
             return None
 
+    def fetch_versions(self, env, key):
+        self.container_name = self._versioned_bucket_of(self.container_name)
+        env['REQUEST_METHOD'] = 'GET'
+        env['QUERY_STRING'] = 'format=json&limit=10000&prefix=%s' % quote(key)
+        body_iter = self._app_call(env)
+        try:
+            files = loads(''.join(list(body_iter)))
+            versions = []
+            for o in files:
+                parts = to_str(o['name']).split('$')
+                versions.append({'deleted': parts[-1] == '0',
+                                 'version': parts[-2]})
+            return sorted(versions,
+                lambda a,b: cmp(a['version'], b['version']))
+        except:
+            return []
+
     def GET(self, env, start_response):
         """
         Handle GET Bucket (List Objects) request

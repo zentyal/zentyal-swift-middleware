@@ -29,6 +29,7 @@ from swift.common.swob import Request, Response, HTTPUnauthorized, \
 
 from swift3 import middleware as swift3
 from swift3.middleware import BucketController
+import urlparse
 
 
 class FakeDatetime(datetime):
@@ -335,6 +336,24 @@ class TestSwift3(unittest.TestCase):
         self.assertEqual(app.call_args_list[0][0][0]['QUERY_STRING'],
                          "format=json&limit=1&prefix=rose")
         self.assertEqual(last_modified, '2011-01-05T02:19:14.275290')
+
+    def test_bucket_fetch_versions(self):
+        app = Mock(wraps=FakeAppBucket())
+        bc = BucketController({}, app, 'token', 'account', 'bucket')
+        versions = bc.fetch_versions({}, 'rose')
+
+        self.assertEqual(app.call_count, 1)
+        qs = app.call_args_list[0][0][0]['QUERY_STRING']
+        args = dict(urlparse.parse_qsl(qs, 1))
+        self.assertEqual(args['prefix'], "rose")
+        self.assertListEqual(versions,
+            [{'deleted': False, 'version': '1294190351.123456'},
+             {'deleted': True,  'version': '1294190352.123456'},
+             {'deleted': False, 'version': '1294190353.123456'},
+             {'deleted': False, 'version': '1294190354.275290'},
+             {'deleted': False, 'version': '1294190355.275290'},
+             {'deleted': False, 'version': '1294190356.275290'}]
+        )
 
     def test_bucket_GET_versions(self):
         app = Mock(wraps=FakeAppBucket())
