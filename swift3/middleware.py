@@ -1096,7 +1096,46 @@ class ObjectController(BaseController):
         """
         Handle DELETE Object request
         """
-        body_iter = self._app_call(env)
+        if 'QUERY_STRING' in env:
+            args = dict(urlparse.parse_qsl(env['QUERY_STRING'], 1))
+            del env['QUERY_STRING']
+        else:
+            args = {}
+        if 'versionId' in args:
+            tmp_env = env.copy()
+            bc = BucketController(tmp_env, self.app, env['HTTP_X_AUTH_TOKEN'],
+                                  self.account_name, self.container_name)
+            versions = bc.fetch_versions(tmp_env, self.object_name)
+            if not versions:
+                # FIXME to delete the current file without having a versioned
+                # file. This should not happen, but it does
+                tmp_env = env.copy()
+                bc = BucketController(tmp_env, self.app,
+                                      env['HTTP_X_AUTH_TOKEN'],
+                                      self.account_name, self.container_name)
+                time = to_timestamp(
+                    bc.fetch_last_modified_time(tmp_env, self.object_name))
+                if time == args['versionId']:
+                    self._app_call(env)
+                    return Response(status=HTTP_NO_CONTENT)
+                return get_err_response('NoSuchKey')
+
+            if versions[-1]['version'] == args['versionId']:
+                # delete also from the real bucket
+                self._app_call(env)
+            # Delete the versioned file
+            self.container_name = self._versioned_bucket_of(self.container_name)
+            version = None
+            for v in versions:
+                if v['version'] == args['versionId']:
+                    version = v
+                    break
+            if not version:
+                return get_err_response('NoSuchKey')
+            self.object_name = self._versioned_object_at(self.object_name,
+                                                         version['version'],
+                                                         version['deleted'])
+        self._app_call(env)
         status = self._get_status_int()
 
         if status != HTTP_NO_CONTENT:
@@ -1107,6 +1146,12 @@ class ObjectController(BaseController):
             else:
                 return get_err_response('InvalidURI')
 
+        if 'versionId' in args:
+            # For versioned deletions, we won't put a versioned version of the
+            # file we are deleting
+            resp = Response(status=HTTP_NO_CONTENT)
+            return resp
+
         env['REQUEST_METHOD']= 'PUT'
         env['CONTENT_TYPE'] = 'text/plain'
         env['CONTENT_LENGTH'] = '0'
@@ -1114,7 +1159,7 @@ class ObjectController(BaseController):
         self.object_name = self._versioned_object_of(self.object_name,
                                                      datetime.datetime.now(),
                                                      deleted=True)
-        body_iter = self._app_call(env)
+        self._app_call(env)
         status = self._get_status_int()
 
         if status != HTTP_CREATED:

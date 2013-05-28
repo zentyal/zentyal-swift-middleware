@@ -825,6 +825,23 @@ class TestSwift3(unittest.TestCase):
         self.assertEquals(app.call_args_list[1][0][0]['PATH_INFO'],
                          '/v1/test/bucket_versioned/object$1368722581.000000$0')
 
+    def test_object_DELETE_versionId(self):
+        app = Mock(wraps=FakeAppBucket([200, 204]))
+        local_app = swift3.filter_factory({})(app)
+        req = Request.blank('/bucket/rose?versionId=1294190351.123456',
+                            environ={'REQUEST_METHOD': 'DELETE'},
+                            headers={'Authorization': 'AWS test:hmac'})
+        local_app(req.environ, local_app.app.do_start_response)
+        self.assertEquals(app.call_count, 2)
+        self.assertEquals(app.call_args_list[0][0][0]['REQUEST_METHOD'],
+                          'GET')
+        self.assertEquals(app.call_args_list[0][0][0]['PATH_INFO'],
+                         '/v1/test/bucket_versioned')
+        self.assertEquals(app.call_args_list[1][0][0]['REQUEST_METHOD'],
+                          'DELETE')
+        self.assertEquals(app.call_args_list[1][0][0]['PATH_INFO'],
+                          '/v1/test/bucket_versioned/rose$1294190351.123456$1')
+
     def test_object_multi_DELETE(self):
         local_app = swift3.filter_factory({})(FakeAppBucket())
         body = '<?xml version="1.0" encoding="UTF-8"?> \
