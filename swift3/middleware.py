@@ -88,11 +88,12 @@ def to_timestamp(last_modified):
     Returns seconds of a datetime since epoch
 
     :param last_modified: either string in iso format or datetime object
-    :returns: float
+    :returns: string with 6 decimals and 9 integers
     """
     if isinstance(last_modified, basestring):
         last_modified = parse(last_modified)
-    return mktime(last_modified.timetuple()) + last_modified.microsecond / 1e6
+    sec = mktime(last_modified.timetuple()) + last_modified.microsecond / 1e6
+    return "%.6f" % sec
 
 def get_err_response(code):
     """
@@ -417,7 +418,7 @@ class BaseController(WSGIContext):
         format) or datetime which will be its versionId
         """
         # TODO regex last_modified
-        version_id = "%.6f" % to_timestamp(last_modified)
+        version_id = to_timestamp(last_modified)
         return self._versioned_object_at(key, version_id, deleted)
 
     def _versioned_object_at(self, key, version_id, deleted=False):
@@ -615,7 +616,7 @@ class BucketController(BaseController):
             deleted = parts[-1] == '0'
             timestamp = parts[-2]
             name = token_separator.join(parts[0:-2])
-            if name in currents and float(timestamp) == currents[name]:
+            if name in currents and timestamp == currents[name]:
                 continue
             if deleted:
                 objs.append(
