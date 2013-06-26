@@ -5,6 +5,14 @@ Swift3 Middleware for OpenStack Swift, allowing access to OpenStack
 swift via the Amazon S3 API.
 
 
+Developing
+----------
+You should set a virtualenv and you will ready to go
+
+    $ cd virtualenv
+    $ source bootstrap.sh
+
+
 Install
 -------
 

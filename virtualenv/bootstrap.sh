@@ -41,10 +41,18 @@ retry()
    done
 }
 
+# Expand a relative dir
+expand_path()
+{
+    cd "$1" 2>/dev/null || return $?
+    echo "`pwd -P`"
+}
+
+
 env=$(pwd)
 # Destination dir, where to create the virtualenv
 if [ "$#" -eq 0 ]; then
-    dest='venv'
+    dest=$(basename `expand_path ..`)
 else
     dest=$1
 fi
@@ -63,12 +71,7 @@ if [ "$PKGSTOINSTALL" != "" ]; then
 fi
 
 # Create the virutalenv
-if [ ! -f $dest/bin/activate ]; then
-    echo "Creating virtualenv"
-    virtualenv --distribute $dest
-else
-    echo "Using existing virtualenv"
-fi
+virtualenv --distribute $dest
 
 # Activate virtualenv
 cd $dest
@@ -79,13 +82,21 @@ echo "Installing dependencies"
 retry pip install --use-mirrors --download-cache=$PIP_CACHE -r $env/requirements.txt
 
 if [ "$?" -eq 0 ]; then
-    echo
-    echo
-    echo "================================================================"
-    echo "Virtualenv created!. Now you should execute:"
-    echo "  $ source $dest/bin/activate"
-    echo "----------------------------------------------------------------"
-    echo "To execute unit test, just use nosetests on root folder"
-    echo "================================================================"
-    echo
+    if [ $_ != $0 ]; then
+        cd ../..
+        echo
+        echo
+        echo "Environment set, have fun"
+        echo
+    else
+        echo
+        echo
+        echo "================================================================"
+        echo "Virtualenv created!. Now you should execute:"
+        echo "  $ source $dest/bin/activate"
+        echo "----------------------------------------------------------------"
+        echo "To execute unit test, just use nosetests on root folder"
+        echo "================================================================"
+        echo
+    fi
 fi
