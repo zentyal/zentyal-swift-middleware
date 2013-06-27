@@ -667,6 +667,18 @@ class TestSwift3(unittest.TestCase):
         self.assertEquals(headers['etag'],
                           "\"%s\"" % local_app.app.response_headers['etag'])
 
+    def test_object_PUT_no_need_versions_file(self):
+        app = Mock(wraps=FakeAppObject(201))
+        local_app = swift3.filter_factory({})(app)
+        req = Request.blank('/bucket/meta/foo/bar',
+                            environ={'REQUEST_METHOD': 'PUT'},
+                            headers={'Authorization': 'AWS test:hmac'})
+        req.date = datetime.now()
+        req.content_type = 'text/plain'
+        local_app(req.environ, local_app.app.do_start_response)
+        self.assertEquals(app.call_count, 1)
+        self.assertEquals(app.call_args_list[0][0][0]['REQUEST_METHOD'], 'PUT')
+
     def test_object_PUT_versioned(self):
         app = Mock(wraps=FakeAppObject(201))
         local_app = swift3.filter_factory({})(app)
@@ -692,7 +704,7 @@ class TestSwift3(unittest.TestCase):
                          '/v1/test/bucket_versioned/object$1294190354.275290$1')
 
     def test_object_PUT_versioned_error(self):
-        app = Mock(wraps=FakeAppObject([201, 401, 204]))
+        app = Mock(wraps=FakeAppObject([201, 200, 401, 204]))
         local_app = swift3.filter_factory({})(app)
         req = Request.blank('/bucket/object',
                             environ={'REQUEST_METHOD': 'PUT'},
@@ -804,6 +816,17 @@ class TestSwift3(unittest.TestCase):
                             headers={'Authorization': 'AWS test:tester:hmac'})
         resp = local_app(req.environ, local_app.app.do_start_response)
         self.assertEquals(local_app.app.response_args[0].split()[0], '204')
+
+    def test_object_DELETE_no_need_versions_file(self):
+        app = Mock(wraps=FakeAppObject(204))
+        local_app = swift3.filter_factory({})(app)
+        req = Request.blank('/bucket/meta/foo/bar',
+                            environ={'REQUEST_METHOD': 'DELETE'},
+                            headers={'Authorization': 'AWS test:tester:hmac'})
+        local_app(req.environ, local_app.app.do_start_response)
+        self.assertEquals(app.call_count, 1)
+        self.assertEquals(app.call_args_list[0][0][0]['REQUEST_METHOD'],
+                          'DELETE')
 
     @patch('datetime.datetime', FakeDatetime)
     def test_object_DELETE_versioned(self):

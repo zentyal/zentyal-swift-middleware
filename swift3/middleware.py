@@ -433,6 +433,9 @@ class BaseController(WSGIContext):
         """
         return bucket + self.VERSIONS_BUCKET_SUFFIX
 
+    def no_need_versions(self, object_name):
+        return object_name.startswith('meta/')
+
 
 class ServiceController(BaseController):
     """
@@ -1027,7 +1030,7 @@ class ObjectController(BaseController):
                     env['HTTP_X_COPY_FROM'] = value
 
         # 1) Real PUT
-        body_iter = self._app_call(env)
+        self._app_call(env)
         status = self._get_status_int()
 
         if status != HTTP_CREATED:
@@ -1050,6 +1053,9 @@ class ObjectController(BaseController):
             res = Response(status=HTTP_OK,
                            etag=self._response_header_value('etag'))
 
+        if self.no_need_versions(self.object_name):
+            return res
+
         # 2) List Bucket to get timestamp with microseconds precision
         # last-modified header only has seconds precision
         tmp_env = env.copy()
@@ -1066,7 +1072,7 @@ class ObjectController(BaseController):
         self.container_name = self._versioned_bucket_of(self.container_name)
         self.object_name = self._versioned_object_of(self.object_name,
                                                      last_modified)
-        body_iter = self._app_call(env)
+        self._app_call(env)
         status = self._get_status_int()
 
         if status != HTTP_CREATED:
@@ -1146,11 +1152,10 @@ class ObjectController(BaseController):
             else:
                 return get_err_response('InvalidURI')
 
-        if 'versionId' in args:
+        if 'versionId' in args or self.no_need_versions(self.object_name):
             # For versioned deletions, we won't put a versioned version of the
             # file we are deleting
-            resp = Response(status=HTTP_NO_CONTENT)
-            return resp
+            return Response(status=HTTP_NO_CONTENT)
 
         env['REQUEST_METHOD']= 'PUT'
         env['CONTENT_TYPE'] = 'text/plain'
@@ -1246,8 +1251,11 @@ class Swift3Middleware(object):
         if 'Date' in req.headers:
             date = email.utils.parsedate(req.headers['Date'])
             if date is None and 'Expires' in req.params:
-                d = email.utils.formatdate(float(req.params['Expires']))
-                date = email.utils.parsedate(d)
+                try:
+                    d = email.utils.formatdate(float(req.params['Expires']))
+                    date = email.utils.parsedate(d)
+                except ValueError:
+                    pass
 
             if date is None:
                 return get_err_response('AccessDenied')(env, start_response)
