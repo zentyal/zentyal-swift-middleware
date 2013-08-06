@@ -27,4 +27,5 @@ setup(name='swift3',
       packages=['swift3'],
       requires=['swift(>=1.4)', 'python_dateutil(>=2.1)'],
       entry_points={'paste.filter_factory':
-                        ['swift3=swift3.middleware:filter_factory']})
+                        ['swift3=swift3.middleware:filter_factory',
+                         's3auth=swift3.auth:filter_factory']})
