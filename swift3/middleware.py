@@ -434,7 +434,8 @@ class BaseController(WSGIContext):
         return bucket + self.VERSIONS_BUCKET_SUFFIX
 
     def no_need_versions(self, object_name):
-        return object_name.startswith('meta/')
+        return (object_name.startswith('meta/') or
+                object_name.startswith('chunks/'))
 
 
 class ServiceController(BaseController):
